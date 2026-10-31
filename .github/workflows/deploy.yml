@@ -96,6 +96,13 @@ jobs:
           sys.stdout.write(r.stdout.decode()); sys.stderr.write(r.stderr.decode()); sys.exit(r.returncode)
           "
 
+      - name: Create KB search token secret
+        run: |
+          kubectl create secret generic kb-search-token \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=token=${{ secrets.KB_ADMIN_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
