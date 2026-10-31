@@ -147,14 +147,89 @@ function toggleTenant(id) {
 }
 
 function parsePortalUrl(raw) {
-  // https://portal.commerce.ondemand.com/subscription/<sub>/applications/commerce-cloud/builds/<build>
-  // also accept plain  <sub>/<build>  as fallback
   const m = raw.match(/\/subscription\/([^\/]+)\/.*\/builds\/([^\/\s?#]+)/);
   if (m) return {sub: m[1], build: m[2]};
-  // fallback: two slash-separated tokens
   const parts = raw.trim().split('/').filter(Boolean);
   if (parts.length === 2) return {sub: parts[0], build: parts[1]};
   return null;
+}
+
+// --- Insert a live row into the tenant table (or create the section) ---
+function upsertLiveRow(sub, build, jobId) {
+  const rowId = 'job-row-' + jobId;
+  if (document.getElementById(rowId)) return; // already inserted
+
+  // Find or create the tenant section
+  let section = document.querySelector(`.tenant-section[data-sub="${CSS.escape(sub)}"]`);
+  if (!section) {
+    const wrap = document.querySelector('.page-wrap');
+    const emptyState = wrap.querySelector('.empty-state');
+    if (emptyState) emptyState.remove();
+
+    section = document.createElement('div');
+    section.className = 'tenant-section';
+    section.dataset.sub = sub;
+    section.innerHTML = `
+      <div class="tenant-header" onclick="this.closest('.tenant-section').classList.toggle('collapsed')">
+        <span class="tenant-name">${sub}</span>
+        <span class="tenant-count tenant-count-${CSS.escape(sub)}">1 build</span>
+        <span class="chevron"></span>
+      </div>
+      <div class="builds-table-wrap">
+        <table>
+          <thead><tr><th>Build</th><th>Result</th><th>Generated</th><th>KBAs</th><th>Report</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>`;
+    // insert before footer
+    const footer = wrap.closest('div') ? null : null;
+    wrap.appendChild(section);
+  }
+
+  const tbody = section.querySelector('tbody');
+  const tr = document.createElement('tr');
+  tr.id = rowId;
+  tr.innerHTML = `
+    <td>${build}</td>
+    <td><span class="badge badge-unknown">—</span></td>
+    <td>—</td>
+    <td>—</td>
+    <td><span class="badge" style="background:rgba(129,140,248,0.15);color:#c7d2fe">Analyzing…</span></td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+
+  // update count badge
+  const countEl = section.querySelector('.tenant-count');
+  if (countEl) {
+    const n = section.querySelectorAll('tbody tr').length;
+    countEl.textContent = `${n} build${n !== 1 ? 's' : ''}`;
+  }
+}
+
+// --- Poll job status and update the row ---
+function pollJob(sub, build, jobId) {
+  const rowId = 'job-row-' + jobId;
+  const interval = setInterval(async () => {
+    try {
+      const resp = await fetch('/analyze/status/' + jobId);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const tr = document.getElementById(rowId);
+      if (!tr) { clearInterval(interval); return; }
+
+      if (data.status === 'done') {
+        clearInterval(interval);
+        const reportUrl = data.report_url || `/files/${sub}/${build}/report.html`;
+        tr.cells[4].innerHTML = `<a href="${reportUrl}">View Report</a>`;
+        tr.cells[1].innerHTML = `<span class="badge badge-failed">FAILED</span>`; // result in report
+        tr.cells[2].textContent = new Date().toISOString().slice(0,16).replace('T',' ') + ' UTC';
+      } else if (data.status === 'failed') {
+        clearInterval(interval);
+        tr.cells[4].innerHTML = `<span class="badge badge-failed">Failed</span>`;
+        tr.cells[4].title = data.error || '';
+      }
+      // queued / running: keep polling
+    } catch (e) { /* network hiccup, retry next tick */ }
+  }, 5000);
 }
 
 async function triggerAnalysis() {
@@ -171,7 +246,7 @@ async function triggerAnalysis() {
 
   btn.disabled = true;
   status.className = 'trigger-status running';
-  status.textContent = `Analyzing build ${parsed.build} for subscription ${parsed.sub} … this may take 1-2 minutes.`;
+  status.textContent = `Submitting analysis for ${parsed.sub} / ${parsed.build} …`;
 
   try {
     const resp = await fetch('/analyze', {
@@ -181,10 +256,11 @@ async function triggerAnalysis() {
     });
     const data = await resp.json();
     if (resp.ok && data.ok) {
-      const url = '/files/' + parsed.sub + '/' + parsed.build + '/report.html';
       status.className = 'trigger-status success';
-      status.innerHTML = `Analysis complete &mdash; <a href="${url}" style="color:#4ade80;font-weight:600">View Report</a>`;
-      setTimeout(() => location.reload(), 3000);
+      status.textContent = `Queued (job ${data.job_id}). Analyzing…`;
+      document.getElementById('url-input').value = '';
+      upsertLiveRow(parsed.sub, parsed.build, data.job_id);
+      pollJob(parsed.sub, parsed.build, data.job_id);
     } else {
       status.className = 'trigger-status error';
       status.textContent = `Error: ${data.error || 'unknown error'}`;

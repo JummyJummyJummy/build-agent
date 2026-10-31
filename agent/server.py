@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,18 +22,44 @@ logger = logging.getLogger(__name__)
 REPORTS_DIR = os.environ.get("REPORTS_DIR", "/reports")
 POLL_SUBSCRIPTIONS = os.environ.get("POLL_SUBSCRIPTIONS", "")
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
+MAX_CONCURRENT_ANALYSES = int(os.environ.get("MAX_CONCURRENT_ANALYSES", "3"))
 
 _seen_failed: set = set()
-
 _TEMPLATES = Path(__file__).parent / "templates"
+
+# Job queue: job_id -> {status, subscription_code, build_code, report_url, error, queued_at}
+_jobs: dict = {}
+_analysis_semaphore: asyncio.Semaphore | None = None  # init in create_app
 
 
 async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 
+async def _run_analysis_job(job_id: str, subscription_code: str, build_code: str):
+    """Background task: run analysis with concurrency limit, update _jobs in place."""
+    global _analysis_semaphore
+    _jobs[job_id]["status"] = "queued"
+    async with _analysis_semaphore:
+        _jobs[job_id]["status"] = "running"
+        logger.info(f"[job:{job_id}] starting analysis {subscription_code}/{build_code}")
+        try:
+            def _run():
+                from analyzer import run_analysis
+                return run_analysis(subscription_code, build_code)
+            result = await asyncio.to_thread(_run)
+            _jobs[job_id]["status"] = "done"
+            _jobs[job_id]["report_url"] = f"/files/{subscription_code}/{build_code}/report.html"
+            _jobs[job_id]["result"] = result
+            logger.info(f"[job:{job_id}] done")
+        except Exception as e:
+            logger.exception(f"[job:{job_id}] failed")
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["error"] = str(e)
+
+
 async def trigger_analysis(request: Request):
-    """Manual trigger: POST /analyze {subscription_code, build_code}"""
+    """POST /analyze — enqueue analysis, return job_id immediately."""
     try:
         body = await request.json()
         subscription_code = body.get("subscription_code", "")
@@ -40,15 +67,29 @@ async def trigger_analysis(request: Request):
         if not subscription_code or not build_code:
             return JSONResponse({"error": "subscription_code and build_code required"}, status_code=400)
 
-        def _run():
-            from analyzer import run_analysis
-            return run_analysis(subscription_code, build_code)
-
-        result = await asyncio.to_thread(_run)
-        return JSONResponse({"ok": True, "result": result})
+        job_id = str(uuid.uuid4())[:8]
+        _jobs[job_id] = {
+            "status": "queued",
+            "subscription_code": subscription_code,
+            "build_code": build_code,
+            "report_url": None,
+            "error": None,
+            "queued_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        asyncio.create_task(_run_analysis_job(job_id, subscription_code, build_code))
+        return JSONResponse({"ok": True, "job_id": job_id, "status": "queued"})
     except Exception as e:
-        logger.exception("Analysis failed")
+        logger.exception("Failed to enqueue analysis")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def analysis_status(request: Request):
+    """GET /analyze/status/{job_id}"""
+    job_id = request.path_params["job_id"]
+    job = _jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "job not found"}, status_code=404)
+    return JSONResponse({"job_id": job_id, **job})
 
 
 def _collect_reports() -> dict:
@@ -197,12 +238,16 @@ async def _poll_loop():
 
 
 def create_app():
+    global _analysis_semaphore
+    _analysis_semaphore = asyncio.Semaphore(MAX_CONCURRENT_ANALYSES)
+
     reports_path = Path(REPORTS_DIR)
     reports_path.mkdir(parents=True, exist_ok=True)
 
     routes = [
         Route("/health", health),
         Route("/analyze", trigger_analysis, methods=["POST"]),
+        Route("/analyze/status/{job_id}", analysis_status),
         Route("/reports", reports_index),
         Route("/api/reports", reports_json),
         Mount("/files", app=StaticFiles(directory=str(reports_path), html=True)),
