@@ -79,27 +79,26 @@ Return a JSON object with keys: summary, root_cause, evidence, suggestion, kbas.
 
 
 def _fix_json_html_quotes(raw: str) -> str:
-    """Escape unescaped double quotes inside JSON string values that contain HTML.
+    """Fix JSON string values that contain raw HTML with unescaped quotes/newlines.
 
-    LLMs sometimes emit HTML like <pre>"key": "val"</pre> inside a JSON string
-    without escaping the inner quotes, which breaks json.loads. This function
-    walks the raw string character by character, tracking whether we are inside
-    a JSON string, and escapes bare double quotes that appear there.
+    LLMs emit HTML like <pre>"key": "val"\n...</pre> inside JSON strings without
+    escaping inner double-quotes or literal newlines, both of which break json.loads.
     """
     import re as _re
-    # Fast path: try a targeted fix for the most common pattern —
-    # double quotes inside <pre>...</pre> or <code>...</code> blocks within a
-    # JSON string. Replace them with &quot; so the JSON stays valid.
-    def _escape_inner_quotes(m):
-        # m.group(0) is the full HTML tag content; escape any " not already escaped
-        inner = m.group(1)
-        inner = _re.sub(r'(?<!\\)"', '&quot;', inner)
-        return m.group(0).replace(m.group(1), inner)
 
-    # Replace " inside <pre>...</pre> blocks
-    raw = _re.sub(r'<pre>(.*?)</pre>', _escape_inner_quotes, raw, flags=_re.DOTALL)
-    # Replace " inside <code>...</code> blocks
-    raw = _re.sub(r'<code>(.*?)</code>', _escape_inner_quotes, raw, flags=_re.DOTALL)
+    def _sanitize_block(m):
+        inner = m.group(1)
+        # escape unescaped double quotes
+        inner = _re.sub(r'(?<!\\)"', '&quot;', inner)
+        # escape literal newlines (invalid inside a JSON string)
+        inner = inner.replace('\n', '\\n').replace('\r', '')
+        tag = m.group(0)
+        open_tag = tag[:tag.index('>') + 1]
+        close_tag = '</' + tag.split('</')[-1]
+        return open_tag + inner + close_tag
+
+    raw = _re.sub(r'<pre>(.*?)</pre>', _sanitize_block, raw, flags=_re.DOTALL)
+    raw = _re.sub(r'<code>(.*?)</code>', _sanitize_block, raw, flags=_re.DOTALL)
     return raw
 
 
