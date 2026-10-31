@@ -77,6 +77,7 @@ def list_builds(subscription_code: str, status: str = None, since_seconds: int =
         return []
     if builds:
         logger.info(f"list_builds sample keys: {list(builds[0].keys()) if isinstance(builds[0], dict) else builds[0]}")
+        logger.info(f"list_builds sample build: status={builds[0].get('status')} buildEndTimestamp={builds[0].get('buildEndTimestamp')}")
     else:
         logger.warning(f"list_builds unexpected response type: {type(raw)}, raw={str(raw)[:200]}")
         return []
