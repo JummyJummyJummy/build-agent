@@ -24,9 +24,9 @@ spec:
             - name: REPORTS_DIR
               value: "/reports"
             - name: POLL_SUBSCRIPTIONS
-              value: ""  # set via ConfigMap or env
+              value: "f1578a24ed8e4a19922762be6d5bc267"
             - name: POLL_INTERVAL
-              value: "300"
+              value: "1800"
             - name: KB_SEARCH_URL
               value: "https://kb-search.c3378d8.kyma.ondemand.com"
             - name: KB_ADMIN_TOKEN
