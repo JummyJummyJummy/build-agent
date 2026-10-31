@@ -57,12 +57,34 @@ def download_build_logs(subscription_code: str, build_code: str, dest_path: str)
     return dest_path
 
 
-def list_builds(subscription_code: str, status: str = None) -> list:
-    """List builds for a subscription. Optional status filter e.g. 'FAILED'."""
+def list_builds(subscription_code: str, status: str = None, since_seconds: int = None) -> list:
+    """List builds for a subscription.
+
+    status: optional filter e.g. 'FAILED'
+    since_seconds: if set, only return builds whose endTime is within this many seconds ago
+    """
     url = f"{PORTAL_API_BASE}/subscriptions/{subscription_code}/builds"
     resp = requests.get(url, headers=_headers(), timeout=30)
     resp.raise_for_status()
     builds = resp.json()
     if status:
         builds = [b for b in builds if b.get("status") == status]
+    if since_seconds is not None:
+        cutoff = time.time() - since_seconds
+        filtered = []
+        for b in builds:
+            # Portal API returns endTime as epoch ms or ISO string
+            end_time = b.get("endTime") or b.get("finishedAt") or b.get("updatedAt") or 0
+            if isinstance(end_time, str):
+                try:
+                    import datetime
+                    dt = datetime.datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                    end_time = dt.timestamp()
+                except Exception:
+                    end_time = 0
+            elif isinstance(end_time, (int, float)) and end_time > 1e10:
+                end_time = end_time / 1000  # ms → s
+            if end_time >= cutoff:
+                filtered.append(b)
+        builds = filtered
     return builds
