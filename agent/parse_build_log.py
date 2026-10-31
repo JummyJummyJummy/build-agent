@@ -71,13 +71,13 @@ ANCHOR_PATTERNS = [
     re.compile(r'PrintOutputHandler.*sterr:\s+BUILD FAILED'),
     re.compile(r'PrintOutputHandler.*stdout:\s+BUILD FAILED'),
     re.compile(r'ERROR.*\[FAILED\].*Command.*failed on retry'),
-    re.compile(r'Exception in thread "main"'),
+    re.compile(r'Exception in thread ["\']main["\']'),
 ]
 
 ERROR_RE = re.compile(r'''
     OutOfMemoryError | GC\ overhead | GCLocker | out\ of\ resources
     | java\.lang\.\w+Error | java\.lang\.\w+Exception
-    | de\.hybris\.\w+Exception | de\.hybris\.\w+Error
+    | de\.hybris\.[.\w]+Exception | de\.hybris\.[.\w]+Error
     | \[yjavac\]\ .*(?:error:|cannot\ find\ symbol|does\ not\ exist|unmappable)
     | \[groovyc\]\ .*error
     | npm\ ERR! | yarn\ ERR | \bEACCES\b | \bETIMEDOUT\b | Cannot\ find\ a\ package\.json
@@ -722,12 +722,20 @@ def _scan_errors(task_lines, task_name, line_offset):
     # ── Step 6: fallback sentinel if anchor found but no signals ──────────
     if not signals:
         if anchor_idx is not None:
+            anchor_line = task_lines[anchor_idx]
+            # If anchor line is "Exception in thread", extract the real exception message
+            exc_match = re.search(r'Exception in thread ["\']main["\'] (.+)', anchor_line)
+            fallback_msg = (
+                exc_match.group(1).strip()
+                if exc_match
+                else ('Build process terminated without explicit failure signal '
+                      '(possible OOM kill or infrastructure failure, exit code 137)')
+            )
             return [{
                 'task':                task_name,
                 'type':                'TRUNCATED',
                 'line_number':         line_offset + n,
-                'message':             ('Build process terminated without explicit failure signal '
-                                        '(possible OOM kill or infrastructure failure, exit code 137)'),
+                'message':             fallback_msg,
                 'same_thread_context': [],
                 'raw_context':         task_lines[max(0, n - 50):],
             }]
