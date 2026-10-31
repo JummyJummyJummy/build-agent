@@ -107,6 +107,7 @@ jobs:
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           sed "s|REGISTRY/build-agent:latest|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
+          sed "s|REGISTRY/build-agent:latest|${IMAGE}|g" k8s/cronjob-cleanup.yaml | kubectl apply -f -
           kubectl apply -f k8s/apirule.yaml
 
       - name: Wait for rollout
