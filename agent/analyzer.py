@@ -252,17 +252,6 @@ def _generate_email_txt(subscription_code: str, build_code: str,
     if error_msgs:
         symptom += f"The following errors were detected: {error_msgs}."
 
-    # Investigation points (extract from root_cause, 3-5 sentences)
-    rc_sentences = [s.strip() for s in root_cause.replace('\n', ' ').split('.') if len(s.strip()) > 20]
-    investigation_points = rc_sentences[:5]
-
-    # Cause bullets (from root_cause remainder)
-    cause_bullets = rc_sentences[5:9] if len(rc_sentences) > 5 else rc_sentences[:4]
-
-    # Solution steps (from suggestion)
-    suggestion_lines = [l.strip() for l in suggestion.splitlines() if l.strip()]
-    solution_steps = suggestion_lines[:5]
-
     lines = [
         f"Subject: [Build {build_code}] Build Failed - {project}",
         "",
@@ -275,21 +264,14 @@ def _generate_email_txt(subscription_code: str, build_code: str,
         symptom,
         "",
         "##Investigation##",
-    ]
-    for i, pt in enumerate(investigation_points, 1):
-        lines.append(f"{i}. {pt}.")
-    lines += [
+        root_cause,
         "",
         "##Cause##",
-    ]
-    for pt in cause_bullets:
-        lines.append(f"- {pt}.")
-    lines += [
+        root_cause,
         "",
         "##Solution##",
+        suggestion,
     ]
-    for i, step in enumerate(solution_steps, 1):
-        lines.append(f"{i}. {step}")
     if kba_lines:
         lines.append("")
         lines += kba_lines
