@@ -31,10 +31,39 @@
   .page-header h1 { font-size: 1.7em; font-weight: 700; color: #fff; margin-bottom: 6px; }
   .page-header .subtitle { font-size: 0.85em; color: rgba(255,255,255,0.45); letter-spacing: 0.03em; }
 
-  .stats-strip { display: flex; gap: 14px; margin-bottom: 32px; flex-wrap: wrap; }
+  .stats-strip { display: flex; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
   .stat-card { flex: 1; min-width: 140px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; padding: 14px 16px; }
   .stat-label { font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.38); margin-bottom: 5px; }
   .stat-value { font-size: 1.4em; font-weight: 700; color: rgba(255,255,255,0.9); }
+
+  /* Trigger form */
+  .trigger-card {
+    background: rgba(129,140,248,0.08); border: 1px solid rgba(129,140,248,0.22);
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 32px;
+  }
+  .trigger-title { font-size: 0.78em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: #c7d2fe; margin-bottom: 14px; }
+  .trigger-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .trigger-field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 200px; }
+  .trigger-field label { font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: rgba(255,255,255,0.38); }
+  .trigger-field input {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 7px; padding: 9px 12px; color: rgba(255,255,255,0.9);
+    font-family: 'Inter', monospace; font-size: 0.88em; outline: none;
+    transition: border-color .2s;
+  }
+  .trigger-field input:focus { border-color: #818CF8; }
+  .trigger-field input::placeholder { color: rgba(255,255,255,0.22); }
+  .trigger-btn {
+    background: #818CF8; color: #fff; border: none; border-radius: 7px;
+    padding: 9px 22px; font-size: 0.85em; font-weight: 600; cursor: pointer;
+    transition: background .2s, opacity .2s; white-space: nowrap;
+  }
+  .trigger-btn:hover { background: #6366f1; }
+  .trigger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .trigger-status { margin-top: 12px; font-size: 0.83em; display: none; padding: 8px 12px; border-radius: 6px; }
+  .trigger-status.running { display: block; background: rgba(129,140,248,0.15); color: #c7d2fe; }
+  .trigger-status.success { display: block; background: rgba(74,222,128,0.12); color: #4ade80; }
+  .trigger-status.error   { display: block; background: rgba(248,113,113,0.12); color: #f87171; }
 
   .tenant-section { margin-bottom: 24px; }
   .tenant-header {
@@ -91,6 +120,21 @@
     <div class="stat-card"><div class="stat-label">Failed Builds</div><div class="stat-value" style="color:#f87171">{{TOTAL_FAILED}}</div></div>
   </div>
 
+  <!-- Trigger form -->
+  <div class="trigger-card">
+    <div class="trigger-title">&#9889; Trigger New Analysis</div>
+    <div class="trigger-row">
+      <div class="trigger-field" style="flex:3">
+        <label>Build URL (from CCv2 Portal)</label>
+        <input id="url-input" type="text"
+          placeholder="https://portal.commerce.ondemand.com/subscription/.../builds/..."
+          autocomplete="off" spellcheck="false">
+      </div>
+      <button class="trigger-btn" id="trigger-btn" onclick="triggerAnalysis()">Analyze</button>
+    </div>
+    <div class="trigger-status" id="trigger-status"></div>
+  </div>
+
   {{TENANT_SECTIONS_HTML}}
 
 </div>
@@ -101,6 +145,61 @@
 function toggleTenant(id) {
   document.getElementById(id).classList.toggle('collapsed');
 }
+
+function parsePortalUrl(raw) {
+  // https://portal.commerce.ondemand.com/subscription/<sub>/applications/commerce-cloud/builds/<build>
+  // also accept plain  <sub>/<build>  as fallback
+  const m = raw.match(/\/subscription\/([^\/]+)\/.*\/builds\/([^\/\s?#]+)/);
+  if (m) return {sub: m[1], build: m[2]};
+  // fallback: two slash-separated tokens
+  const parts = raw.trim().split('/').filter(Boolean);
+  if (parts.length === 2) return {sub: parts[0], build: parts[1]};
+  return null;
+}
+
+async function triggerAnalysis() {
+  const raw    = document.getElementById('url-input').value.trim();
+  const btn    = document.getElementById('trigger-btn');
+  const status = document.getElementById('trigger-status');
+
+  const parsed = parsePortalUrl(raw);
+  if (!parsed) {
+    status.className = 'trigger-status error';
+    status.textContent = 'Could not parse subscription/build from URL. Paste the full Portal build URL.';
+    return;
+  }
+
+  btn.disabled = true;
+  status.className = 'trigger-status running';
+  status.textContent = `Analyzing build ${parsed.build} for subscription ${parsed.sub} … this may take 1-2 minutes.`;
+
+  try {
+    const resp = await fetch('/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({subscription_code: parsed.sub, build_code: parsed.build}),
+    });
+    const data = await resp.json();
+    if (resp.ok && data.ok) {
+      const url = '/files/' + parsed.sub + '/' + parsed.build + '/report.html';
+      status.className = 'trigger-status success';
+      status.innerHTML = `Analysis complete &mdash; <a href="${url}" style="color:#4ade80;font-weight:600">View Report</a>`;
+      setTimeout(() => location.reload(), 3000);
+    } else {
+      status.className = 'trigger-status error';
+      status.textContent = `Error: ${data.error || 'unknown error'}`;
+    }
+  } catch (e) {
+    status.className = 'trigger-status error';
+    status.textContent = `Request failed: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.activeElement.id === 'url-input') triggerAnalysis();
+});
 </script>
 </body>
 </html>
