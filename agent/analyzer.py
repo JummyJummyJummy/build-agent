@@ -142,9 +142,136 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
     )
 
 
+def _strip_html(html_str: str) -> str:
+    """Remove HTML tags and decode common entities for plain-text email."""
+    import re
+    text = re.sub(r'<br\s*/?>', '\n', html_str or "", flags=re.IGNORECASE)
+    text = re.sub(r'<li[^>]*>', '\n- ', text, flags=re.IGNORECASE)
+    text = re.sub(r'<ol[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</ol>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'<ul[^>]*>', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'</ul>', '', text, flags=re.IGNORECASE)
+    # numbered list items <li> inside <ol> — replace with numbers
+    counter = [0]
+    def _num_li(m):
+        counter[0] += 1
+        return f'\n{counter[0]}. '
+    text = re.sub(r'<li[^>]*>', _num_li, text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>') \
+               .replace('&nbsp;', ' ').replace('&#39;', "'").replace('&quot;', '"')
+    # collapse excessive blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _generate_email_txt(subscription_code: str, build_code: str,
+                         parsed: dict, kba_matches: list, analysis: dict) -> str:
+    metadata = parsed.get("metadata", {})
+    project = metadata.get("customer_project_name", subscription_code)
+    commerce_version = metadata.get("commerce_version", "unknown")
+    branch = metadata.get("branch", "unknown")
+    build_result = parsed.get("build_result", "FAILED")
+    errors = parsed.get("errors", [])
+
+    summary = _strip_html(analysis.get("summary", ""))
+    root_cause = _strip_html(analysis.get("root_cause", ""))
+    suggestion = _strip_html(analysis.get("suggestion", ""))
+    kbas = analysis.get("kbas", [])
+
+    # Build KBA reference lines
+    kba_lines = []
+    seen = set()
+    for k in kbas:
+        kid = str(k.get("id", "")).strip()
+        if not kid or kid in seen:
+            continue
+        seen.add(kid)
+        kba_lines.append(
+            f"See KBA {kid} - {k.get('title', '')}: https://me.sap.com/notes/{kid}/E"
+        )
+    for m in kba_matches:
+        doc_id = m.get("doc_id", "")
+        # extract numeric KBA id from doc_id like "kba:3740808:0"
+        parts = doc_id.split(":")
+        if len(parts) >= 2 and parts[1].isdigit() and parts[1] not in seen:
+            seen.add(parts[1])
+            kba_lines.append(
+                f"See KBA {parts[1]} - {m.get('title', '')}: {m.get('url', '')}"
+            )
+
+    # Symptom paragraph
+    error_msgs = "; ".join(
+        e.get("message", "")[:200] for e in errors[:3] if e.get("message")
+    )
+    symptom = (
+        f"Build {build_code} on project {project} has failed with result {build_result}. "
+        f"The build was running Commerce version {commerce_version} on branch {branch}. "
+    )
+    if error_msgs:
+        symptom += f"The following errors were detected: {error_msgs}."
+
+    # Investigation points (extract from root_cause, 3-5 sentences)
+    rc_sentences = [s.strip() for s in root_cause.replace('\n', ' ').split('.') if len(s.strip()) > 20]
+    investigation_points = rc_sentences[:5]
+
+    # Cause bullets (from root_cause remainder)
+    cause_bullets = rc_sentences[5:9] if len(rc_sentences) > 5 else rc_sentences[:4]
+
+    # Solution steps (from suggestion)
+    suggestion_lines = [l.strip() for l in suggestion.splitlines() if l.strip()]
+    solution_steps = suggestion_lines[:5]
+
+    lines = [
+        f"Subject: [Build {build_code}] Build Failed - {project}",
+        "",
+        "Dear Customer,",
+        "",
+        "Hope this message finds you well.",
+        "After a deep investigation, I would like to provide the below summary for you:",
+        "",
+        "#Symptoms#",
+        symptom,
+        "",
+        "##Investigation##",
+    ]
+    for i, pt in enumerate(investigation_points, 1):
+        lines.append(f"{i}. {pt}.")
+    lines += [
+        "",
+        "##Cause##",
+    ]
+    for pt in cause_bullets:
+        lines.append(f"- {pt}.")
+    lines += [
+        "",
+        "##Solution##",
+    ]
+    for i, step in enumerate(solution_steps, 1):
+        lines.append(f"{i}. {step}")
+    if kba_lines:
+        lines.append("")
+        lines += kba_lines
+    lines += [
+        "",
+        "We hope the summary above can help you :) If you have any remaining concerns or need further support, please don't hesitate to let me know :)",
+        "I am always happy to help you.",
+        "",
+        "Best regards,",
+        "Jummy",
+        "SAP Support",
+        "-----------------------------------",
+        "KBA 1239839 - How to close an incident on the SAP One Support Launchpad",
+        "https://launchpad.support.sap.com/#/notes/1239839",
+        "KBA 2331471 - How your feedback counts in completing the SAP Support Interaction Survey",
+        "https://launchpad.support.sap.com/#/notes/2331471",
+    ]
+    return "\n".join(lines)
+
+
 def _generate_html_report(subscription_code: str, build_code: str,
                            parsed: dict, kba_matches: list, analysis: dict,
-                           report_path: str) -> None:
+                           report_path: str, email_txt: str = "") -> None:
     import html as H
     template_path = Path(__file__).parent / "templates" / "build_report_glass.html"
     template = template_path.read_text(encoding="utf-8")
@@ -172,6 +299,7 @@ def _generate_html_report(subscription_code: str, build_code: str,
         "{{EVIDENCE_HTML}}":        analysis.get("evidence", ""),
         "{{RESOLUTION_HTML}}":      analysis.get("suggestion", ""),
         "{{REFERENCE_HTML}}":       _render_kba_table(analysis.get("kbas", []), kba_matches),
+        "{{EMAIL_TXT}}":            email_txt.replace("</", "<\\/").replace("`", "\\`"),
     }
 
     out = template
@@ -224,9 +352,14 @@ def run_analysis(subscription_code: str, build_code: str) -> dict:
         "analysis": analysis,
     }, indent=2), encoding="utf-8")
 
-    # 6. HTML report
+    # 6. Email text
+    email_txt = _generate_email_txt(subscription_code, build_code, parsed, kba_matches, analysis)
+    email_path = str(report_dir / "email.txt")
+    Path(email_path).write_text(email_txt, encoding="utf-8")
+
+    # 7. HTML report
     report_html = str(report_dir / "report.html")
-    _generate_html_report(subscription_code, build_code, parsed, kba_matches, analysis, report_html)
+    _generate_html_report(subscription_code, build_code, parsed, kba_matches, analysis, report_html, email_txt)
 
     logger.info(f"Analysis complete: {report_html}")
     return {
