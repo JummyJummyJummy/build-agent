@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 from portal_client import download_build_logs, get_build_progress
-from parse_build_log import parse_log_file
+from parse_build_log import parse_log as parse_log_file
 from kb_client import search_kbas, get_kba
 from llm_client import analyze
 
