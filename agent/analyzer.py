@@ -17,10 +17,10 @@ REPORTS_DIR = os.environ.get("REPORTS_DIR", "/reports")
 
 
 def _kba_matches(errors: list) -> list:
-    """For each error, search KB and return top matches."""
+    """For each error, search KB and return top matches with full content for high-score hits."""
     matches = []
     seen_ids = set()
-    for err in errors[:5]:  # limit to top 5 errors to avoid too many KB calls
+    for err in errors[:5]:
         query = err.get("message", "") or err.get("type", "")
         if not query:
             continue
@@ -29,6 +29,19 @@ def _kba_matches(errors: list) -> list:
             doc_id = r.get("id", "")
             if doc_id and doc_id not in seen_ids:
                 seen_ids.add(doc_id)
+                full_content = None
+                if (r.get("score") or 0) > 0.3:
+                    try:
+                        detail = get_kba("build", doc_id)
+                        # response: {"id": ..., "data": {"content": ..., ...}, ...}
+                        data = detail.get("data") or {}
+                        full_content = (
+                            data.get("content")
+                            or detail.get("content")
+                            or detail.get("text")
+                        )
+                    except Exception as e:
+                        logger.warning("get_kba failed for %s: %s", doc_id, e)
                 matches.append({
                     "error": query[:120],
                     "kba_id": r.get("title", ""),
@@ -37,6 +50,7 @@ def _kba_matches(errors: list) -> list:
                     "url": r.get("url", ""),
                     "snippet": r.get("snippet", ""),
                     "doc_id": doc_id,
+                    "full_content": full_content,
                 })
     return matches
 
@@ -53,8 +67,24 @@ def _build_llm_prompt(parsed: dict, kba_matches: list) -> tuple[str, str]:
         "Return ONLY the JSON object, no markdown fences, no extra text."
     )
     errors_text = json.dumps(parsed.get("errors", [])[:10], indent=2)
-    kba_text = json.dumps(kba_matches[:5], indent=2)
     metadata = parsed.get("metadata", {})
+
+    # Build KBA section: summary list + full content for high-score matches
+    kba_summary = []
+    kba_full_blocks = []
+    for m in kba_matches[:5]:
+        entry = {k: v for k, v in m.items() if k != "full_content"}
+        kba_summary.append(entry)
+        if m.get("full_content"):
+            parts = (m.get("doc_id", "") or "").split(":")
+            kba_num = parts[1] if len(parts) >= 2 and parts[1].isdigit() else m.get("doc_id", "")
+            kba_full_blocks.append(
+                f"### KBA {kba_num} — {m.get('title', '')}\n{m['full_content']}"
+            )
+
+    kba_summary_text = json.dumps(kba_summary, indent=2)
+    kba_full_text = ("\n\n".join(kba_full_blocks)) if kba_full_blocks else ""
+
     user = f"""Build Analysis Request
 
 ## Build Metadata
@@ -65,14 +95,17 @@ def _build_llm_prompt(parsed: dict, kba_matches: list) -> tuple[str, str]:
 ## Top Errors
 {errors_text}
 
-## Matching KBAs from knowledge base
-{kba_text}
-
+## Matching KBAs from knowledge base (summary)
+{kba_summary_text}
+{f'''
+## Full KBA Content (use this as the primary source for root cause and resolution steps)
+{kba_full_text}
+''' if kba_full_text else ''}
 Return a JSON object with keys: summary, root_cause, evidence, suggestion, kbas.
 - summary: 2-3 sentence HTML overview of what failed and why.
 - root_cause: HTML explanation of the root cause, referencing exact error messages with <code>.
 - evidence: HTML with the key log lines or stack traces as <pre> blocks.
-- suggestion: HTML numbered steps to fix the issue.
+- suggestion: HTML numbered steps to fix the issue, drawn from the full KBA content above when available.
 - kbas: list of {{id, title, confidence}} objects for relevant KBA notes (use IDs from the knowledge base matches above when available).
 """
     return system, user
