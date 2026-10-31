@@ -47,6 +47,8 @@ def _build_llm_prompt(parsed: dict, kba_matches: list) -> tuple[str, str]:
         "Analyze build failures and return a JSON object with these exact keys: "
         "summary, root_cause, evidence, suggestion, kbas. "
         "All values except kbas must be HTML strings (use <p>, <code>, <pre>, <ul>/<li> as appropriate). "
+        "IMPORTANT: inside JSON string values, never use raw double-quote characters (\") — "
+        "use &quot; instead for any double quotes that appear inside HTML attribute values or code examples. "
         "kbas is a list of objects with id (KBA number as string), title, and confidence (high/medium/low). "
         "Return ONLY the JSON object, no markdown fences, no extra text."
     )
@@ -76,6 +78,31 @@ Return a JSON object with keys: summary, root_cause, evidence, suggestion, kbas.
     return system, user
 
 
+def _fix_json_html_quotes(raw: str) -> str:
+    """Escape unescaped double quotes inside JSON string values that contain HTML.
+
+    LLMs sometimes emit HTML like <pre>"key": "val"</pre> inside a JSON string
+    without escaping the inner quotes, which breaks json.loads. This function
+    walks the raw string character by character, tracking whether we are inside
+    a JSON string, and escapes bare double quotes that appear there.
+    """
+    import re as _re
+    # Fast path: try a targeted fix for the most common pattern —
+    # double quotes inside <pre>...</pre> or <code>...</code> blocks within a
+    # JSON string. Replace them with &quot; so the JSON stays valid.
+    def _escape_inner_quotes(m):
+        # m.group(0) is the full HTML tag content; escape any " not already escaped
+        inner = m.group(1)
+        inner = _re.sub(r'(?<!\\)"', '&quot;', inner)
+        return m.group(0).replace(m.group(1), inner)
+
+    # Replace " inside <pre>...</pre> blocks
+    raw = _re.sub(r'<pre>(.*?)</pre>', _escape_inner_quotes, raw, flags=_re.DOTALL)
+    # Replace " inside <code>...</code> blocks
+    raw = _re.sub(r'<code>(.*?)</code>', _escape_inner_quotes, raw, flags=_re.DOTALL)
+    return raw
+
+
 def _parse_analysis_json(raw: str) -> dict:
     """Extract structured JSON from LLM response, falling back to plain text wrapping."""
     raw = raw.strip()
@@ -84,23 +111,25 @@ def _parse_analysis_json(raw: str) -> dict:
         raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
         if raw.endswith("```"):
             raw = raw[:-3].strip()
-    try:
-        data = json.loads(raw)
-        for key in ("summary", "root_cause", "evidence", "suggestion"):
-            if key not in data:
-                data[key] = ""
-        if "kbas" not in data:
-            data["kbas"] = []
-        return data
-    except json.JSONDecodeError:
-        html = raw.replace("\n", "<br>")
-        return {
-            "summary": f"<p>{html}</p>",
-            "root_cause": "",
-            "evidence": "",
-            "suggestion": "",
-            "kbas": [],
-        }
+    for attempt in (raw, _fix_json_html_quotes(raw)):
+        try:
+            data = json.loads(attempt)
+            for key in ("summary", "root_cause", "evidence", "suggestion"):
+                if key not in data:
+                    data[key] = ""
+            if "kbas" not in data:
+                data["kbas"] = []
+            return data
+        except json.JSONDecodeError:
+            continue
+    html = raw.replace("\n", "<br>")
+    return {
+        "summary": f"<p>{html}</p>",
+        "root_cause": "",
+        "evidence": "",
+        "suggestion": "",
+        "kbas": [],
+    }
 
 
 def _render_kba_table(kbas: list, kb_matches: list) -> str:
