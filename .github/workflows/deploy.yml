@@ -71,16 +71,30 @@ jobs:
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Create AI Core credentials secret
+        env:
+          AI_CORE_BASE_URL: ${{ secrets.AI_CORE_BASE_URL }}
+          AI_CORE_TOKEN_URL: ${{ secrets.AI_CORE_TOKEN_URL }}
+          AI_CORE_CLIENT_ID: ${{ secrets.AI_CORE_CLIENT_ID }}
+          AI_CORE_CLIENT_SECRET: ${{ secrets.AI_CORE_CLIENT_SECRET }}
+          AI_CORE_DEPLOYMENT_ID: ${{ secrets.AI_CORE_DEPLOYMENT_ID }}
+          AI_CORE_RESOURCE_GROUP: ${{ secrets.AI_CORE_RESOURCE_GROUP }}
         run: |
-          kubectl create secret generic ai-core-credentials \
-            --namespace=${{ env.NAMESPACE }} \
-            --from-literal=base_url=${{ secrets.AI_CORE_BASE_URL }} \
-            --from-literal=token_url=${{ secrets.AI_CORE_TOKEN_URL }} \
-            --from-literal=client_id=${{ secrets.AI_CORE_CLIENT_ID }} \
-            --from-literal=client_secret=${{ secrets.AI_CORE_CLIENT_SECRET }} \
-            --from-literal=deployment_id=${{ secrets.AI_CORE_DEPLOYMENT_ID }} \
-            --from-literal=resource_group=${{ secrets.AI_CORE_RESOURCE_GROUP }} \
-            --dry-run=client -o yaml | kubectl apply -f -
+          python3 -c "
+          import os, base64, subprocess, sys
+          ns = os.environ['NAMESPACE']
+          m = {
+            'base_url': 'AI_CORE_BASE_URL',
+            'token_url': 'AI_CORE_TOKEN_URL',
+            'client_id': 'AI_CORE_CLIENT_ID',
+            'client_secret': 'AI_CORE_CLIENT_SECRET',
+            'deployment_id': 'AI_CORE_DEPLOYMENT_ID',
+            'resource_group': 'AI_CORE_RESOURCE_GROUP',
+          }
+          data = ''.join(f'  {k}: {base64.b64encode(os.environ[v].encode()).decode()}\n' for k,v in m.items())
+          yaml = f'apiVersion: v1\nkind: Secret\nmetadata:\n  name: ai-core-credentials\n  namespace: {ns}\ntype: Opaque\ndata:\n{data}'
+          r = subprocess.run([\"kubectl\",\"apply\",\"-f\",\"-\"], input=yaml.encode(), capture_output=True)
+          sys.stdout.write(r.stdout.decode()); sys.stderr.write(r.stderr.decode()); sys.exit(r.returncode)
+          "
 
       - name: Deploy
         run: |
