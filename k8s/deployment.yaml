@@ -28,7 +28,7 @@ spec:
             - name: POLL_INTERVAL
               value: "300"
             - name: KB_SEARCH_URL
-              value: "https://kb-search.c3378d8.kyma.ondemand.com"
+              value: "http://kb-search.kb-search.svc.cluster.local"
             - name: PORTAL_TOKEN_ENDPOINT
               valueFrom:
                 secretKeyRef:
