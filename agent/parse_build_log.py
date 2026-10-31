@@ -77,6 +77,7 @@ ANCHOR_PATTERNS = [
 ERROR_RE = re.compile(r'''
     OutOfMemoryError | GC\ overhead | GCLocker | out\ of\ resources
     | java\.lang\.\w+Error | java\.lang\.\w+Exception
+    | de\.hybris\.\w+Exception | de\.hybris\.\w+Error
     | \[yjavac\]\ .*(?:error:|cannot\ find\ symbol|does\ not\ exist|unmappable)
     | \[groovyc\]\ .*error
     | npm\ ERR! | yarn\ ERR | \bEACCES\b | \bETIMEDOUT\b | Cannot\ find\ a\ package\.json

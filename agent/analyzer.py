@@ -111,6 +111,8 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
     seen = set()
     # AI-provided KBAs first
     for k in kbas:
+        if len(rows) >= 3:
+            break
         kba_id = str(k.get("id", "")).strip()
         if not kba_id or kba_id in seen:
             continue
@@ -125,6 +127,8 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
         )
     # KB search matches as supplementary (low confidence if not already listed)
     for m in kb_matches:
+        if len(rows) >= 3:
+            break
         title = m.get("title", "")
         if title in seen:
             continue
