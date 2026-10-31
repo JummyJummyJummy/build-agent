@@ -157,13 +157,22 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
     for m in kb_matches:
         if len(rows) >= 3:
             break
-        title = m.get("title", "")
-        if title in seen:
+        # Extract numeric KBA id from doc_id like "kba:3740808:0"
+        doc_id = m.get("doc_id", "")
+        parts = doc_id.split(":")
+        kba_num = parts[1] if len(parts) >= 2 and parts[1].isdigit() else None
+        # Skip if this KBA number already in table
+        if kba_num and kba_num in seen:
             continue
-        seen.add(title)
+        title = m.get("title", "")
+        if not kba_num and title in seen:
+            continue
+        seen.add(kba_num or title)
         url = m.get("url", "#")
+        kba_label = kba_num if kba_num else "—"
+        kba_href = f"https://me.sap.com/notes/{kba_num}/E" if kba_num else H.escape(url)
         rows.append(
-            f'<tr><td><a href="{H.escape(url)}" target="_blank">—</a></td>'
+            f'<tr><td><a href="{kba_href}" target="_blank">{H.escape(kba_label)}</a></td>'
             f'<td>{H.escape(title)}</td>'
             f'<td><span class="conf-low">LOW</span></td></tr>'
         )
