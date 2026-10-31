@@ -82,7 +82,9 @@ def list_builds(subscription_code: str, status: str = None, since_seconds: int =
         logger.warning(f"list_builds unexpected response type: {type(raw)}, raw={str(raw)[:200]}")
         return []
     if status:
-        builds = [b for b in builds if isinstance(b, dict) and b.get("status") == status]
+        # Portal API may return "FAIL" or "FAILED" — normalize with startswith
+        status_prefix = status.upper().rstrip("ED")  # "FAILED" → "FAIL"
+        builds = [b for b in builds if isinstance(b, dict) and b.get("status", "").upper().startswith(status_prefix)]
     if since_seconds is not None:
         cutoff = time.time() - since_seconds
         filtered = []
