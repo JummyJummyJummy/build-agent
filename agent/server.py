@@ -182,7 +182,7 @@ async def reports_index(request: Request):
             )
             tid = f"tenant-{i}"
             sections.append(
-                f'<div class="tenant-section" id="{tid}">'
+                f'<div class="tenant-section" id="{tid}" data-sub="{H.escape(sub)}">'
                 f'<div class="tenant-header" onclick="toggleTenant(\'{tid}\')">'
                 f'<span class="tenant-name">{H.escape(sub)}</span>'
                 f'<span class="tenant-count">{len(builds)} build{"s" if len(builds)!=1 else ""}</span>'

@@ -166,6 +166,8 @@ def _parse_analysis_json(raw: str) -> dict:
 
 def _render_kba_table(kbas: list, kb_matches: list) -> str:
     import html as H
+    def _clean_title(t: str) -> str:
+        return H.unescape(t or "")
     if not kbas and not kb_matches:
         return "<p>No KBA matches found. Open an incident on <strong>CEC-SCC-CLA-BUI</strong> with the build log attached.</p>"
     rows = []
@@ -183,7 +185,7 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
         url = f"https://me.sap.com/notes/{kba_id}/E"
         rows.append(
             f'<tr><td><a href="{url}" target="_blank">{H.escape(kba_id)}</a></td>'
-            f'<td>{H.escape(k.get("title", ""))}</td>'
+            f'<td>{H.escape(_clean_title(k.get("title", "")))}</td>'
             f'<td><span class="{conf_cls}">{conf.upper()}</span></td></tr>'
         )
     # KB search matches as supplementary (low confidence if not already listed)
@@ -197,7 +199,7 @@ def _render_kba_table(kbas: list, kb_matches: list) -> str:
         # Skip if this KBA number already in table
         if kba_num and kba_num in seen:
             continue
-        title = m.get("title", "")
+        title = _clean_title(m.get("title", ""))
         if not kba_num and title in seen:
             continue
         seen.add(kba_num or title)
