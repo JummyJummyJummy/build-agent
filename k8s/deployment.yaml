@@ -49,12 +49,36 @@ spec:
                 secretKeyRef:
                   name: portal-credentials
                   key: resource
-            # AI Core — add when provisioned
-            # - name: AI_CORE_BASE_URL
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: ai-core-credentials
-            #       key: base_url
+            - name: AI_CORE_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: base_url
+            - name: AI_CORE_TOKEN_URL
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: token_url
+            - name: AI_CORE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: client_id
+            - name: AI_CORE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: client_secret
+            - name: AI_CORE_DEPLOYMENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: deployment_id
+            - name: AI_CORE_RESOURCE_GROUP
+              valueFrom:
+                secretKeyRef:
+                  name: ai-core-credentials
+                  key: resource_group
           volumeMounts:
             - name: reports
               mountPath: /reports

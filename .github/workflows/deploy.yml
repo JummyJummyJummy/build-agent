@@ -70,6 +70,18 @@ jobs:
             --from-literal=resource=${{ secrets.PORTAL_RESOURCE }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Create AI Core credentials secret
+        run: |
+          kubectl create secret generic ai-core-credentials \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=base_url=${{ secrets.AI_CORE_BASE_URL }} \
+            --from-literal=token_url=${{ secrets.AI_CORE_TOKEN_URL }} \
+            --from-literal=client_id=${{ secrets.AI_CORE_CLIENT_ID }} \
+            --from-literal=client_secret=${{ secrets.AI_CORE_CLIENT_SECRET }} \
+            --from-literal=deployment_id=${{ secrets.AI_CORE_DEPLOYMENT_ID }} \
+            --from-literal=resource_group=${{ secrets.AI_CORE_RESOURCE_GROUP }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Deploy
         run: |
           IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
