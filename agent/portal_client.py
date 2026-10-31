@@ -86,7 +86,7 @@ def list_builds(subscription_code: str, status: str = None, since_seconds: int =
         cutoff = time.time() - since_seconds
         filtered = []
         for b in builds:
-            end_time = b.get("endTime") or b.get("finishedAt") or b.get("updatedAt") or 0
+            end_time = b.get("buildEndTimestamp") or b.get("endTime") or b.get("finishedAt") or b.get("updatedAt") or 0
             if isinstance(end_time, str):
                 try:
                     import datetime
