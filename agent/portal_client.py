@@ -75,6 +75,11 @@ def list_builds(subscription_code: str, status: str = None, since_seconds: int =
     else:
         logger.warning(f"list_builds unexpected response type: {type(raw)}, raw={str(raw)[:200]}")
         return []
+    if builds:
+        logger.info(f"list_builds sample keys: {list(builds[0].keys()) if isinstance(builds[0], dict) else builds[0]}")
+    else:
+        logger.warning(f"list_builds unexpected response type: {type(raw)}, raw={str(raw)[:200]}")
+        return []
     if status:
         builds = [b for b in builds if isinstance(b, dict) and b.get("status") == status]
     if since_seconds is not None:
