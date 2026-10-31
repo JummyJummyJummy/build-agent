@@ -692,7 +692,14 @@ def _scan_errors(task_lines, task_name, line_offset):
     thread_index = _build_thread_index(task_lines)
 
     # ── Step 4: collect error signals ─────────────────────────────────────
+    # Also check the anchor line itself — e.g. "Exception in thread "main"
+    # de.hybris.ccv2.BuilderException: ..." carries the real error message on
+    # the same line as the anchor, which would otherwise be excluded from
+    # scan_lines (scan stops before anchor_idx).
     raw_signals = []
+    if anchor_idx is not None and ERROR_RE.search(task_lines[anchor_idx]):
+        raw_signals.append((anchor_idx, task_lines[anchor_idx]))
+
     for i, line in enumerate(scan_lines):
         # Skip [echo] lines — Ant echo tasks emit informational strings that may
         # contain substrings like "fatal:" or error codes but are not failures
