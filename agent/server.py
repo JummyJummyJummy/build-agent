@@ -271,7 +271,10 @@ def create_app():
         Mount("/files", app=StaticFiles(directory=str(reports_path), html=True)),
     ]
 
-    app = Starlette(routes=routes, on_startup=[lambda: asyncio.create_task(_poll_loop())])
+    async def _start_poll_loop():
+        asyncio.create_task(_poll_loop())
+
+    app = Starlette(routes=routes, on_startup=[_start_poll_loop])
     return app
 
 
