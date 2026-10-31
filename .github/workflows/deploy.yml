@@ -1,0 +1,80 @@
+name: Build and Deploy to Kyma
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: jummy2026/build-agent
+  NAMESPACE: build-agent
+  SERVICE_URL: https://build-agent.c3378d8.kyma.ondemand.com
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: jummy2026
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > ~/.kube/config
+
+      - name: Apply namespace and PVC
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/pvc.yaml
+
+      - name: Create imagePullSecret
+        run: |
+          kubectl create secret docker-registry registry-secret \
+            --namespace=${{ env.NAMESPACE }} \
+            --docker-server=docker.io \
+            --docker-username=jummy2026 \
+            --docker-password=${{ secrets.DOCKERHUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create portal credentials secret
+        run: |
+          kubectl create secret generic portal-credentials \
+            --namespace=${{ env.NAMESPACE }} \
+            --from-literal=token_endpoint=${{ secrets.PORTAL_TOKEN_ENDPOINT }} \
+            --from-literal=client_id=${{ secrets.PORTAL_CLIENT_ID }} \
+            --from-literal=client_secret=${{ secrets.PORTAL_CLIENT_SECRET }} \
+            --from-literal=resource=${{ secrets.PORTAL_RESOURCE }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          sed "s|REGISTRY/build-agent:latest|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/apirule.yaml
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/build-agent -n ${{ env.NAMESPACE }} --timeout=300s

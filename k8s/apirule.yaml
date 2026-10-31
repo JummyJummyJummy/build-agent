@@ -1,0 +1,26 @@
+apiVersion: gateway.kyma-project.io/v2
+kind: APIRule
+metadata:
+  name: build-agent
+  namespace: build-agent
+spec:
+  hosts:
+    - build-agent
+  service:
+    name: build-agent
+    port: 80
+  gateway: kyma-system/kyma-gateway
+  rules:
+    - path: /health
+      methods: ["GET"]
+      noAuth: true
+    - path: /analyze
+      methods: ["POST"]
+      noAuth: true
+      timeout: 600
+    - path: /reports
+      methods: ["GET"]
+      noAuth: true
+    - path: /*
+      methods: ["GET"]
+      noAuth: true
