@@ -217,14 +217,20 @@ def _poll_once():
             continue
         try:
             builds = list_builds(sub, status="FAILED")
+            logger.info(f"Poll {sub}: {len(builds)} FAILED build(s) found, sample={builds[:1]}")
             for b in builds:
-                key = f"{sub}/{b.get('code','')}"
+                # Portal API may return 'code' or 'buildCode'
+                build_code = b.get("code") or b.get("buildCode") or b.get("build_code") or ""
+                if not build_code:
+                    logger.warning(f"Could not extract build code from: {b}")
+                    continue
+                key = f"{sub}/{build_code}"
                 if key in _seen_failed:
                     continue
                 _seen_failed.add(key)
                 logger.info(f"New FAILED build detected: {key}")
                 try:
-                    run_analysis(sub, b["code"])
+                    run_analysis(sub, build_code)
                 except Exception as e:
                     logger.error(f"Analysis failed for {key}: {e}")
         except Exception as e:
@@ -232,6 +238,8 @@ def _poll_once():
 
 
 async def _poll_loop():
+    # poll once immediately on startup, then every POLL_INTERVAL seconds
+    await asyncio.to_thread(_poll_once)
     while True:
         await asyncio.sleep(POLL_INTERVAL)
         await asyncio.to_thread(_poll_once)
