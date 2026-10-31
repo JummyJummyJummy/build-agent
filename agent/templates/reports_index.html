@@ -96,6 +96,8 @@
   .badge-failed  { color: #f87171; background: rgba(248,113,113,0.12); }
   .badge-success { color: #4ade80; background: rgba(74,222,128,0.12); }
   .badge-unknown { color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.06); }
+  .badge-scan    { color: #7dd3fc; background: rgba(125,211,252,0.12); }
+  .badge-manual  { color: #c4b5fd; background: rgba(196,181,253,0.12); }
 
   .empty-state { text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.3); font-size: 0.9em; }
 
@@ -194,6 +196,7 @@ function upsertLiveRow(sub, build, jobId) {
     <td><span class="badge badge-unknown">—</span></td>
     <td>—</td>
     <td>—</td>
+    <td><span class="badge badge-manual">Manual</span></td>
     <td><span class="badge" style="background:rgba(129,140,248,0.15);color:#c7d2fe">Analyzing…</span></td>`;
   tbody.insertBefore(tr, tbody.firstChild);
 
@@ -219,13 +222,13 @@ function pollJob(sub, build, jobId) {
       if (data.status === 'done') {
         clearInterval(interval);
         const reportUrl = data.report_url || `/files/${sub}/${build}/report.html`;
-        tr.cells[4].innerHTML = `<a href="${reportUrl}">View Report</a>`;
+        tr.cells[5].innerHTML = `<a href="${reportUrl}">View Report</a>`;
         tr.cells[1].innerHTML = `<span class="badge badge-failed">FAILED</span>`; // result in report
         tr.cells[2].textContent = new Date().toISOString().slice(0,16).replace('T',' ') + ' UTC';
       } else if (data.status === 'failed') {
         clearInterval(interval);
-        tr.cells[4].innerHTML = `<span class="badge badge-failed">Failed</span>`;
-        tr.cells[4].title = data.error || '';
+        tr.cells[5].innerHTML = `<span class="badge badge-failed">Failed</span>`;
+        tr.cells[5].title = data.error || '';
       }
       // queued / running: keep polling
     } catch (e) { /* network hiccup, retry next tick */ }

@@ -366,9 +366,9 @@ def _generate_html_report(subscription_code: str, build_code: str,
     logger.info(f"HTML report written to {report_path}")
 
 
-def run_analysis(subscription_code: str, build_code: str) -> dict:
+def run_analysis(subscription_code: str, build_code: str, trigger_source: str = "manual") -> dict:
     """Main analysis pipeline. Returns report metadata."""
-    logger.info(f"Starting analysis: {subscription_code}/{build_code}")
+    logger.info(f"Starting analysis: {subscription_code}/{build_code} (source={trigger_source})")
 
     report_dir = Path(REPORTS_DIR) / subscription_code / build_code
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -404,6 +404,7 @@ def run_analysis(subscription_code: str, build_code: str) -> dict:
         "subscription_code": subscription_code,
         "build_code": build_code,
         "build_result": parsed.get("build_result"),
+        "trigger_source": trigger_source,
         "kba_matches": kba_matches,
         "analysis": analysis,
     }, indent=2), encoding="utf-8")

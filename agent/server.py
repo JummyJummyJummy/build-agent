@@ -46,7 +46,7 @@ async def _run_analysis_job(job_id: str, subscription_code: str, build_code: str
         try:
             def _run():
                 from analyzer import run_analysis
-                return run_analysis(subscription_code, build_code)
+                return run_analysis(subscription_code, build_code, trigger_source="manual")
             result = await asyncio.to_thread(_run)
             _jobs[job_id]["status"] = "done"
             _jobs[job_id]["report_url"] = f"/files/{subscription_code}/{build_code}/report.html"
@@ -114,12 +114,14 @@ def _collect_reports() -> dict:
                 "build_result": None,
                 "kba_count": 0,
                 "generated_at": None,
+                "trigger_source": None,
             }
             if analysis_json.exists():
                 try:
                     data = json.loads(analysis_json.read_text())
                     entry["build_result"] = data.get("build_result")
                     entry["kba_count"] = len(data.get("kba_matches", []))
+                    entry["trigger_source"] = data.get("trigger_source")
                 except Exception:
                     pass
             if report_html.exists():
@@ -157,17 +159,25 @@ async def reports_index(request: Request):
                     badge = '<span class="badge badge-success">SUCCESSFUL</span>'
                 else:
                     badge = f'<span class="badge badge-unknown">{H.escape(result)}</span>'
+                src = b.get("trigger_source")
+                if src == "auto_scan":
+                    src_badge = '<span class="badge badge-scan">Auto Scan</span>'
+                elif src == "manual":
+                    src_badge = '<span class="badge badge-manual">Manual</span>'
+                else:
+                    src_badge = '<span class="badge badge-unknown">—</span>'
                 link = f'<a href="{H.escape(b["report_url"])}">View Report</a>'
                 rows.append(
                     f'<tr><td>{H.escape(b["build_code"])}</td>'
                     f'<td>{badge}</td>'
                     f'<td>{H.escape(b.get("generated_at") or "—")}</td>'
                     f'<td>{b.get("kba_count", 0)}</td>'
+                    f'<td>{src_badge}</td>'
                     f'<td>{link}</td></tr>'
                 )
             table = (
                 '<div class="builds-table-wrap"><table>'
-                '<thead><tr><th>Build</th><th>Result</th><th>Generated</th><th>KBAs</th><th>Report</th></tr></thead>'
+                '<thead><tr><th>Build</th><th>Result</th><th>Generated</th><th>KBAs</th><th>Source</th><th>Report</th></tr></thead>'
                 '<tbody>' + "".join(rows) + '</tbody></table></div>'
             )
             tid = f"tenant-{i}"
@@ -230,7 +240,7 @@ def _poll_once():
                 _seen_failed.add(key)
                 logger.info(f"New FAILED build detected: {key}")
                 try:
-                    run_analysis(sub, build_code)
+                    run_analysis(sub, build_code, trigger_source="auto_scan")
                 except Exception as e:
                     logger.error(f"Analysis failed for {key}: {e}")
         except Exception as e:
