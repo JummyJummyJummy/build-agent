@@ -163,7 +163,7 @@ def run_analysis(subscription_code: str, build_code: str) -> dict:
         if not log_files:
             log_files = list(Path(tmp).rglob("*"))
         log_file = str(sorted(log_files, key=lambda f: f.stat().st_size, reverse=True)[0])
-        parsed = parse_log_file(log_file)
+        parsed, _banner_blocks = parse_log_file(log_file)
 
     parsed_path = str(report_dir / "parsed.json")
     Path(parsed_path).write_text(json.dumps(parsed, indent=2), encoding="utf-8")
