@@ -217,7 +217,7 @@ def _poll_once():
             continue
         try:
             builds = list_builds(sub, status="FAILED", since_seconds=POLL_INTERVAL)
-            logger.info(f"Poll {sub}: {len(builds)} FAILED build(s) in last {POLL_INTERVAL}s, sample={builds[:1]}")
+            logger.info(f"Poll {sub}: {len(builds)} FAILED build(s) in last {POLL_INTERVAL}s")
             for b in builds:
                 # Portal API may return 'code' or 'buildCode'
                 build_code = b.get("code") or b.get("buildCode") or b.get("build_code") or ""

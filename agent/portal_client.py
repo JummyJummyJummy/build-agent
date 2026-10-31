@@ -66,14 +66,21 @@ def list_builds(subscription_code: str, status: str = None, since_seconds: int =
     url = f"{PORTAL_API_BASE}/subscriptions/{subscription_code}/builds"
     resp = requests.get(url, headers=_headers(), timeout=30)
     resp.raise_for_status()
-    builds = resp.json()
+    raw = resp.json()
+    # Portal API may wrap results: {"value": [...]} or return list directly
+    if isinstance(raw, dict):
+        builds = raw.get("value") or raw.get("builds") or raw.get("content") or []
+    elif isinstance(raw, list):
+        builds = raw
+    else:
+        logger.warning(f"list_builds unexpected response type: {type(raw)}, raw={str(raw)[:200]}")
+        return []
     if status:
-        builds = [b for b in builds if b.get("status") == status]
+        builds = [b for b in builds if isinstance(b, dict) and b.get("status") == status]
     if since_seconds is not None:
         cutoff = time.time() - since_seconds
         filtered = []
         for b in builds:
-            # Portal API returns endTime as epoch ms or ISO string
             end_time = b.get("endTime") or b.get("finishedAt") or b.get("updatedAt") or 0
             if isinstance(end_time, str):
                 try:
