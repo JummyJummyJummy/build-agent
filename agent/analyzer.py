@@ -44,8 +44,11 @@ def _kba_matches(errors: list) -> list:
 def _build_llm_prompt(parsed: dict, kba_matches: list) -> tuple[str, str]:
     system = (
         "You are an SAP Commerce Cloud support engineer. "
-        "Analyze build failures and provide concise root cause analysis and resolution steps. "
-        "Be specific, reference exact error messages and KBA numbers."
+        "Analyze build failures and return a JSON object with these exact keys: "
+        "summary, root_cause, evidence, suggestion, kbas. "
+        "All values except kbas must be HTML strings (use <p>, <code>, <pre>, <ul>/<li> as appropriate). "
+        "kbas is a list of objects with id (KBA number as string), title, and confidence (high/medium/low). "
+        "Return ONLY the JSON object, no markdown fences, no extra text."
     )
     errors_text = json.dumps(parsed.get("errors", [])[:10], indent=2)
     kba_text = json.dumps(kba_matches[:5], indent=2)
@@ -60,87 +63,122 @@ def _build_llm_prompt(parsed: dict, kba_matches: list) -> tuple[str, str]:
 ## Top Errors
 {errors_text}
 
-## Matching KBAs
+## Matching KBAs from knowledge base
 {kba_text}
 
-Please provide:
-1. Root cause summary (2-3 sentences)
-2. Most likely resolution steps (numbered)
-3. Relevant KBA references
+Return a JSON object with keys: summary, root_cause, evidence, suggestion, kbas.
+- summary: 2-3 sentence HTML overview of what failed and why.
+- root_cause: HTML explanation of the root cause, referencing exact error messages with <code>.
+- evidence: HTML with the key log lines or stack traces as <pre> blocks.
+- suggestion: HTML numbered steps to fix the issue.
+- kbas: list of {{id, title, confidence}} objects for relevant KBA notes (use IDs from the knowledge base matches above when available).
 """
     return system, user
 
 
+def _parse_analysis_json(raw: str) -> dict:
+    """Extract structured JSON from LLM response, falling back to plain text wrapping."""
+    raw = raw.strip()
+    # strip markdown fences if present
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3].strip()
+    try:
+        data = json.loads(raw)
+        for key in ("summary", "root_cause", "evidence", "suggestion"):
+            if key not in data:
+                data[key] = ""
+        if "kbas" not in data:
+            data["kbas"] = []
+        return data
+    except json.JSONDecodeError:
+        html = raw.replace("\n", "<br>")
+        return {
+            "summary": f"<p>{html}</p>",
+            "root_cause": "",
+            "evidence": "",
+            "suggestion": "",
+            "kbas": [],
+        }
+
+
+def _render_kba_table(kbas: list, kb_matches: list) -> str:
+    import html as H
+    if not kbas and not kb_matches:
+        return "<p>No KBA matches found. Open an incident on <strong>CEC-SCC-CLA-BUI</strong> with the build log attached.</p>"
+    rows = []
+    seen = set()
+    # AI-provided KBAs first
+    for k in kbas:
+        kba_id = str(k.get("id", "")).strip()
+        if not kba_id or kba_id in seen:
+            continue
+        seen.add(kba_id)
+        conf = k.get("confidence", "low").lower()
+        conf_cls = {"high": "conf-high", "medium": "conf-medium"}.get(conf, "conf-low")
+        url = f"https://me.sap.com/notes/{kba_id}/E"
+        rows.append(
+            f'<tr><td><a href="{url}" target="_blank">{H.escape(kba_id)}</a></td>'
+            f'<td>{H.escape(k.get("title", ""))}</td>'
+            f'<td><span class="{conf_cls}">{conf.upper()}</span></td></tr>'
+        )
+    # KB search matches as supplementary (low confidence if not already listed)
+    for m in kb_matches:
+        title = m.get("title", "")
+        if title in seen:
+            continue
+        seen.add(title)
+        url = m.get("url", "#")
+        rows.append(
+            f'<tr><td><a href="{H.escape(url)}" target="_blank">—</a></td>'
+            f'<td>{H.escape(title)}</td>'
+            f'<td><span class="conf-low">LOW</span></td></tr>'
+        )
+    return (
+        "<table>"
+        "<thead><tr><th>KBA</th><th>Title</th><th>Confidence</th></tr></thead>"
+        "<tbody>" + "".join(rows) + "</tbody></table>"
+    )
+
+
 def _generate_html_report(subscription_code: str, build_code: str,
-                           parsed: dict, kba_matches: list, analysis: str,
+                           parsed: dict, kba_matches: list, analysis: dict,
                            report_path: str) -> None:
+    import html as H
+    template_path = Path(__file__).parent / "templates" / "build_report_glass.html"
+    template = template_path.read_text(encoding="utf-8")
+
     metadata = parsed.get("metadata", {})
-    errors = parsed.get("errors", [])
     build_result = parsed.get("build_result", "UNKNOWN")
-    result_color = "#d32f2f" if "FAIL" in build_result else "#388e3c"
+    badge_cls = "badge-failed" if "FAIL" in build_result else "badge-success"
+    result_label = build_result.replace("_", " ")
 
-    kba_rows = ""
-    for m in kba_matches:
-        kba_rows += f"""<tr>
-            <td>{m.get('error','')[:80]}</td>
-            <td><a href="{m.get('url','#')}" target="_blank">{m.get('title','')}</a></td>
-            <td>{m.get('snippet','')[:150]}</td>
-        </tr>"""
+    replacements = {
+        "{{BUILD_ID}}":             H.escape(build_code),
+        "{{CUSTOMER_PROJECT}}":     H.escape(subscription_code),
+        "{{TIMESTAMP}}":            datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "{{BUILD_RESULT}}":         result_label,
+        "{{RESULT_BADGE_CLASS}}":   badge_cls,
+        "{{BRANCH}}":               H.escape(metadata.get("branch", "—")),
+        "{{COMMERCE_VERSION}}":     H.escape(metadata.get("commerce_version", "—")),
+        "{{SOLR_VERSION}}":         "—",
+        "{{EXTENSION_PACKS_HTML}}": "<span style='color:rgba(255,255,255,0.35)'>—</span>",
+        "{{BUILDER_VERSION}}":      H.escape(metadata.get("builder_version", "—")),
+        "{{IMAGE_VERSION}}":        H.escape(metadata.get("image_version", "—")),
+        "{{JSAPPS_DETAIL_HTML}}":   "<p>No JS application info.</p>",
+        "{{SUMMARY_HTML}}":         analysis.get("summary", ""),
+        "{{ROOT_CAUSE_HTML}}":      analysis.get("root_cause", ""),
+        "{{EVIDENCE_HTML}}":        analysis.get("evidence", ""),
+        "{{RESOLUTION_HTML}}":      analysis.get("suggestion", ""),
+        "{{REFERENCE_HTML}}":       _render_kba_table(analysis.get("kbas", []), kba_matches),
+    }
 
-    error_rows = ""
-    for e in errors[:20]:
-        error_rows += f"<tr><td>{e.get('type','')}</td><td><code>{str(e.get('message',''))[:200]}</code></td></tr>"
+    out = template
+    for key, val in replacements.items():
+        out = out.replace(key, val)
 
-    analysis_html = analysis.replace("\n", "<br>")
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Build Analysis — {build_code}</title>
-<style>
-  body {{ font-family: Arial, sans-serif; margin: 2rem; color: #333; }}
-  h1 {{ color: #1a73e8; }}
-  .result {{ font-size: 1.4rem; font-weight: bold; color: {result_color}; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; }}
-  th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; vertical-align: top; }}
-  th {{ background: #f5f5f5; }}
-  .analysis {{ background: #f9f9f9; border-left: 4px solid #1a73e8; padding: 1rem; margin: 1rem 0; }}
-  code {{ background: #eee; padding: 2px 4px; font-size: 0.85em; }}
-</style>
-</head>
-<body>
-<h1>Build Failure Analysis</h1>
-<p><strong>Subscription:</strong> {subscription_code} &nbsp;|&nbsp;
-   <strong>Build:</strong> {build_code} &nbsp;|&nbsp;
-   <strong>Generated:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
-<p class="result">{build_result}</p>
-
-<h2>Build Metadata</h2>
-<table>
-  <tr><th>Commerce Version</th><td>{metadata.get('commerce_version','—')}</td></tr>
-  <tr><th>Builder Version</th><td>{metadata.get('builder_version','—')}</td></tr>
-  <tr><th>Java Version</th><td>{metadata.get('java_version','—')}</td></tr>
-</table>
-
-<h2>AI Analysis</h2>
-<div class="analysis">{analysis_html}</div>
-
-<h2>Matching KBAs ({len(kba_matches)})</h2>
-<table>
-  <tr><th>Error</th><th>KBA</th><th>Snippet</th></tr>
-  {kba_rows or '<tr><td colspan="3">No KBA matches found</td></tr>'}
-</table>
-
-<h2>Errors ({len(errors)})</h2>
-<table>
-  <tr><th>Type</th><th>Message</th></tr>
-  {error_rows or '<tr><td colspan="2">No errors extracted</td></tr>'}
-</table>
-</body>
-</html>"""
-
-    Path(report_path).write_text(html, encoding="utf-8")
+    Path(report_path).write_text(out, encoding="utf-8")
     logger.info(f"HTML report written to {report_path}")
 
 
@@ -173,7 +211,8 @@ def run_analysis(subscription_code: str, build_code: str) -> dict:
 
     # 4. LLM analysis
     system_prompt, user_prompt = _build_llm_prompt(parsed, kba_matches)
-    analysis = analyze(system_prompt, user_prompt)
+    raw_analysis = analyze(system_prompt, user_prompt)
+    analysis = _parse_analysis_json(raw_analysis)
 
     # 5. Save analysis
     analysis_path = str(report_dir / "analysis.json")

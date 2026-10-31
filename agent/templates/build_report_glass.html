@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Build Analysis Report — {{BUILD_ID}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: linear-gradient(135deg, #1c2340 0%, #2e2b5f 45%, #1a2e45 100%) fixed;
+    font-family: 'Inter', sans-serif;
+    color: rgba(255,255,255,0.85);
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  .orb { position: fixed; border-radius: 50%; filter: blur(80px); opacity: 0.25; pointer-events: none; z-index: 0; }
+  .orb-1 { width: 480px; height: 480px; background: #7dd3fc; top: -120px; left: -120px; animation: floatOrb1 10s ease-in-out infinite; }
+  .orb-2 { width: 360px; height: 360px; background: #a5b4fc; top: 40%; right: -80px; animation: floatOrb2 12s ease-in-out infinite; }
+  .orb-3 { width: 300px; height: 300px; background: #38bdf8; bottom: 60px; left: 30%; animation: floatOrb3 8s ease-in-out infinite; }
+
+  @keyframes floatOrb1 { 0%,100% { transform: translate(0,0) scale(1); } 33% { transform: translate(30px,40px) scale(1.05); } 66% { transform: translate(-20px,20px) scale(0.97); } }
+  @keyframes floatOrb2 { 0%,100% { transform: translate(0,0) scale(1); } 40% { transform: translate(-30px,-25px) scale(1.08); } 70% { transform: translate(15px,30px) scale(0.95); } }
+  @keyframes floatOrb3 { 0%,100% { transform: translate(0,0) scale(1); } 30% { transform: translate(25px,-30px) scale(1.06); } 65% { transform: translate(-15px,15px) scale(0.98); } }
+
+  .page-wrap { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 32px 20px 60px; }
+
+  /* Header */
+  .report-header { text-align: center; margin-bottom: 32px; }
+  .report-header h1 { font-size: 1.6em; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .report-header .subtitle { font-size: 0.88em; color: rgba(255,255,255,0.55); letter-spacing: 0.03em; }
+
+  /* KV summary strip */
+  .kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 28px; }
+  .kv-card { padding: 14px 16px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); transition: border-color .25s, box-shadow .25s, transform .25s; }
+  .kv-card:hover { border-color: rgba(255,255,255,0.22); box-shadow: 0 6px 24px rgba(0,0,0,0.25); transform: translateY(-2px); }
+  .kv-label { font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255,255,255,0.4); margin-bottom: 5px; }
+  .kv-value { font-size: 0.95em; font-weight: 600; color: rgba(255,255,255,0.9); word-break: break-word; }
+  .badge-failed  { display: inline-block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f87171; }
+  .badge-success { display: inline-block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4ade80; }
+
+  /* Tab bar */
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0; }
+  .tab-btn {
+    padding: 9px 22px; font-size: 0.82em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+    background: transparent; border: none; color: rgba(255,255,255,0.45); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .2s, border-color .2s;
+  }
+  .tab-btn:hover { color: rgba(255,255,255,0.75); }
+  .tab-btn.active { color: #c7d2fe; border-bottom-color: #818CF8; }
+
+  /* Tab panels */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Collapsible section cards */
+  .section-card { margin-bottom: 10px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.10); }
+  .section-card-header { display: flex; align-items: center; justify-content: space-between; padding: 13px 18px; cursor: pointer; background: rgba(255,255,255,0.05); transition: background .3s; user-select: none; }
+  .section-card-header:hover { background: rgba(255,255,255,0.08); }
+  .section-card.expanded .section-card-header { background: rgba(129,140,248,0.18); border-left: 3px solid #818CF8; }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .header-icon { font-size: 1.05em; }
+  .header-title { font-size: 0.83em; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(255,255,255,0.88); }
+  .section-card.expanded .header-title { color: #c7d2fe; }
+  .chevron { display: inline-block; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid rgba(255,255,255,0.45); transition: transform .3s; }
+  .section-card.expanded .chevron { transform: rotate(180deg); border-top-color: #818CF8; }
+  .section-card-body { max-height: 0; overflow: hidden; transition: max-height .4s ease; background: rgba(255,255,255,0.035); }
+  .section-card.expanded .section-card-body { max-height: none; }
+  .section-card-body-inner { padding: 18px 20px 20px; border-top: 1px solid rgba(255,255,255,0.07); }
+
+  /* Card text */
+  .card-text { font-size: 0.875em; line-height: 1.75; color: rgba(255,255,255,0.78); }
+  .card-text p { margin-bottom: 10px; }
+  .card-text p:last-child { margin-bottom: 0; }
+  .card-text strong { color: white; }
+  .card-text ul, .card-text ol { margin: 8px 0 10px 20px; }
+  .card-text li { margin-bottom: 6px; }
+  .card-text code { background: rgba(129,140,248,0.2); color: #a5b4fc; padding: 1px 6px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; font-weight: 600; }
+  .card-text a { color: #818CF8; text-decoration: none; }
+  .card-text a:hover { text-decoration: underline; }
+  .card-text pre { background: rgba(0,0,0,0.4); color: rgba(255,255,255,0.85); border: 1px solid rgba(255,255,255,0.1); border-left: 3px solid #818CF8; border-radius: 8px; padding: 14px 16px; font-family: 'Courier New', monospace; font-size: 0.82em; line-height: 1.65; overflow-x: auto; white-space: pre; margin: 10px 0; }
+  .card-text table { width: 100%; border-collapse: collapse; font-size: 0.88em; border-radius: 8px; overflow: hidden; margin: 10px 0 12px; }
+  .card-text table th { background: rgba(129,140,248,0.15); color: rgba(255,255,255,0.7); font-weight: 600; text-align: left; padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.04em; }
+  .card-text table td { padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); vertical-align: top; }
+  .card-text table tr:last-child td { border-bottom: none; }
+  .card-text table tbody tr { background: rgba(255,255,255,0.03); }
+  .card-text table tbody tr:hover { background: rgba(129,140,248,0.08); }
+
+  /* Build Info table */
+  .info-table td:first-child { width: 190px; color: rgba(255,255,255,0.42); font-size: 0.81em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+  .info-table td:last-child { color: rgba(255,255,255,0.9); }
+
+  /* Tags */
+  .tag { display: inline-block; background: rgba(129,140,248,0.18); color: #a5b4fc; border-radius: 4px; padding: 1px 9px; font-size: 0.85em; font-family: 'Courier New', monospace; margin-right: 4px; margin-bottom: 3px; }
+  .tag-warn    { background: rgba(251,191,36,0.15);  color: #fbbf24; }
+  .tag-ok      { background: rgba(74,222,128,0.15);  color: #4ade80; }
+  .tag-neutral { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
+
+  /* JS App block */
+  .jsapp-block { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px 14px; margin-top: 4px; }
+  .jsapp-block .jsapp-name { font-size: 0.9em; font-weight: 700; color: rgba(255,255,255,0.9); margin-bottom: 8px; }
+  .jsapp-row { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; font-size: 0.83em; }
+  .jsapp-key { color: rgba(255,255,255,0.38); width: 130px; flex-shrink: 0; font-size: 0.88em; text-transform: uppercase; letter-spacing: 0.05em; }
+  .jsapp-val { color: rgba(255,255,255,0.82); }
+
+  /* Evidence label */
+  .evidence-label { font-size: 0.78em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: rgba(255,255,255,0.45); margin-top: 16px; margin-bottom: 8px; }
+  .evidence-label:first-child { margin-top: 0; }
+
+  /* Root cause / Resolution */
+  .root-cause-box { font-size: 0.875em; color: rgba(255,255,255,0.88); line-height: 1.75; }
+  .resolution-box { font-size: 0.875em; color: rgba(255,255,255,0.88); line-height: 1.75; }
+
+  /* Confidence */
+  .conf-high   { color: #f87171; font-weight: 700; }
+  .conf-medium { color: #fbbf24; font-weight: 700; }
+  .conf-low    { color: #818CF8; font-weight: 700; }
+
+  footer { text-align: center; padding: 20px; font-size: 0.77em; color: rgba(255,255,255,0.25); border-top: 1px solid rgba(255,255,255,0.08); position: relative; z-index: 5; margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<div class="page-wrap">
+
+  <!-- Header -->
+  <div class="report-header">
+    <h1>Build Analysis Report</h1>
+    <div class="subtitle">Build {{BUILD_ID}} &nbsp;&middot;&nbsp; {{CUSTOMER_PROJECT}} &nbsp;&middot;&nbsp; {{TIMESTAMP}}</div>
+  </div>
+
+  <!-- KV strip -->
+  <div class="kv-grid">
+    <div class="kv-card"><div class="kv-label">Build ID</div><div class="kv-value">{{BUILD_ID}}</div></div>
+    <div class="kv-card"><div class="kv-label">Result</div><div class="kv-value"><span class="{{RESULT_BADGE_CLASS}}">{{BUILD_RESULT}}</span></div></div>
+    <div class="kv-card"><div class="kv-label">Branch</div><div class="kv-value">{{BRANCH}}</div></div>
+    <div class="kv-card"><div class="kv-label">Commerce Version</div><div class="kv-value">{{COMMERCE_VERSION}}</div></div>
+    <div class="kv-card"><div class="kv-label">Analyzed</div><div class="kv-value">{{TIMESTAMP}}</div></div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('tab-info', this)">Build Info</button>
+    <button class="tab-btn"        onclick="switchTab('tab-ai',   this)">AI Summary</button>
+  </div>
+
+  <!-- ── TAB: Build Info ── -->
+  <div class="tab-panel active" id="tab-info">
+
+    <div class="section-card expanded" id="card-platform">
+      <div class="section-card-header" onclick="toggleCard('card-platform')">
+        <div class="header-left"><span class="header-icon">🏗️</span><span class="header-title">Platform</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        <table class="info-table">
+          <tbody>
+            <tr><td>Commerce Version</td><td><span class="tag">{{COMMERCE_VERSION}}</span></td></tr>
+            <tr><td>Extension Packs</td><td>{{EXTENSION_PACKS_HTML}}</td></tr>
+            <tr><td>Solr Version</td><td><span class="tag">{{SOLR_VERSION}}</span></td></tr>
+            <tr><td>Builder Version</td><td><span class="tag">{{BUILDER_VERSION}}</span></td></tr>
+            <tr><td>Image Version</td><td><span class="tag">{{IMAGE_VERSION}}</span></td></tr>
+          </tbody>
+        </table>
+      </div></div></div>
+    </div>
+
+    <div class="section-card expanded" id="card-jsapps">
+      <div class="section-card-header" onclick="toggleCard('card-jsapps')">
+        <div class="header-left"><span class="header-icon">📦</span><span class="header-title">JS Applications</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        {{JSAPPS_DETAIL_HTML}}
+      </div></div></div>
+    </div>
+
+  </div><!-- /tab-info -->
+
+  <!-- ── TAB: AI Summary ── -->
+  <div class="tab-panel" id="tab-ai">
+
+    <div class="section-card expanded" id="card-summary">
+      <div class="section-card-header" onclick="toggleCard('card-summary')">
+        <div class="header-left"><span class="header-icon">📋</span><span class="header-title">Summary</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        {{SUMMARY_HTML}}
+      </div></div></div>
+    </div>
+
+    <div class="section-card expanded" id="card-rootcause">
+      <div class="section-card-header" onclick="toggleCard('card-rootcause')">
+        <div class="header-left"><span class="header-icon">🔍</span><span class="header-title">Root Cause</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        <div class="root-cause-box">{{ROOT_CAUSE_HTML}}</div>
+      </div></div></div>
+    </div>
+
+    <div class="section-card expanded" id="card-evidence">
+      <div class="section-card-header" onclick="toggleCard('card-evidence')">
+        <div class="header-left"><span class="header-icon">🪵</span><span class="header-title">Evidence</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        {{EVIDENCE_HTML}}
+      </div></div></div>
+    </div>
+
+    <div class="section-card expanded" id="card-resolution">
+      <div class="section-card-header" onclick="toggleCard('card-resolution')">
+        <div class="header-left"><span class="header-icon">🛠️</span><span class="header-title">Suggestion</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        <div class="resolution-box">{{RESOLUTION_HTML}}</div>
+      </div></div></div>
+    </div>
+
+    <div class="section-card expanded" id="card-reference">
+      <div class="section-card-header" onclick="toggleCard('card-reference')">
+        <div class="header-left"><span class="header-icon">📚</span><span class="header-title">Reference</span></div>
+        <span class="chevron"></span>
+      </div>
+      <div class="section-card-body"><div class="section-card-body-inner"><div class="card-text">
+        {{REFERENCE_HTML}}
+      </div></div></div>
+    </div>
+
+  </div><!-- /tab-ai -->
+
+</div><!-- /page-wrap -->
+
+<footer>Generated by analyze-build skill &nbsp;&middot;&nbsp; Build ID: {{BUILD_ID}} &nbsp;&middot;&nbsp; Customer: {{CUSTOMER_PROJECT}} &nbsp;&middot;&nbsp; Component: CEC-SCC-CLA-BUI</footer>
+
+<script>
+function toggleCard(id) {
+  document.getElementById(id).classList.toggle('expanded');
+}
+function switchTab(panelId, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(panelId).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>
